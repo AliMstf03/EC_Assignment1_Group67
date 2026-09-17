@@ -2,6 +2,7 @@
 # import the functions that are already maade in the example 
 from ariel.ec import EA, EAOperation, Individual, Population
 
+
 # Standard library
 import random
 from pathlib import Path
@@ -33,7 +34,7 @@ from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import (
     HighProbabilityDecoder,
 )
 from ariel.ec.genotypes.nde import NeuralDevelopmentalEncoding
-from ariel.ec.genotypes.tree.operators import random_tree
+from ariel.ec.genotypes.tree.operators import (crossover_subtree, random_tree,)
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.video_recorder import VideoRecorder
@@ -117,6 +118,43 @@ def parent_selection(population: Population) -> Population:
 
 
 # ============================================================================ #
+#  4. CROSSOVER
+# ============================================================================ #
+
+def crossover(population: Population) -> Population:
+    # Pak alleen de individuen die als ouder geselecteerd zijn
+    parents = population.where(
+        lambda ind: bool(ind.tags.get("selected", False))
+    )
+
+    # Pak telkens twee ouders
+    for idx in range(0, len(parents) - 1, 2):
+        parent_a = parents[idx]
+        parent_b = parents[idx + 1]
+
+        # Wissel twee willekeurige takken uit
+        genome_a, genome_b = crossover_subtree(
+            parent_a.genotype,
+            parent_b.genotype,
+        )
+
+        # Maak het eerste kind
+        child_a = Individual()
+        child_a.genotype = genome_a
+        child_a.tags = {"mutate": True}
+
+        # Maak het tweede kind
+        child_b = Individual()
+        child_b.genotype = genome_b
+        child_b.tags = {"mutate": True}
+
+        # Voeg de kinderen toe aan de populatie
+        population.extend([child_a, child_b])
+
+    return population
+
+
+# ============================================================================ #
 #  4. FITNESS
 # ============================================================================ #
 
@@ -131,10 +169,12 @@ def fitness_function(
 #  5. EVALUATION FUNCTION
 # ============================================================================ #
 
-def evaluate(population: Population, targets: list[nx.DiGraph],) -> Population:
-    for individual in population:
+def evaluate(population: Population, targets: list[nx.DiGraph]):
+
+    for individual in population.unevaluated:
         body = individual.genotype.to_networkx()
         individual.fitness = fitness_function(body, targets)
+
     return population
 
 
@@ -190,31 +230,41 @@ def show_body(
 
 def main() -> None:
     targets = load_targets()
+    population_size = 80
 
-    POPULATION_SIZE = 70
-    population = Population([make_individual() for _ in range(POPULATION_SIZE)])
+    population = Population(
+        [make_individual() for _ in range(population_size)]
+    )
 
     population = evaluate(population, targets)
     population = parent_selection(population)
-
-    # Evaluate the selected parents again
+    population = crossover(population)
     population = evaluate(population, targets)
 
-    for i, individual in enumerate(population):
-        console.log(
-            f"individual {i}: "
-            f"fitness={individual.fitness_:.4f}, "
-            f"selected={individual.tags.get('selected', False)}"
+    parents = population.where(
+        lambda ind: bool(ind.tags.get("selected", False))
     )
 
+    children = population.where(
+        lambda ind: bool(ind.tags.get("mutate", False))
+    )
 
-    spread = [
-        tree_edit_distance(a, b)
-        for i, a in enumerate(targets)
-        for b in targets[i + 1 :]
-    ]
-    console.log(f"target spread : mean pairwise distance {np.mean(spread):.2f}")
+    console.log("")
+    console.log(f"parents: {len(parents)}")
 
+    for index, parent in enumerate(parents):
+        console.log(
+            f"parent {index}: fitness={parent.fitness_:.4f}"
+        )
+
+    console.log("")
+    console.log(f"children: {len(children)}")
+
+    for index, child in enumerate(children):
+        console.log(
+            f"child {index}: fitness={child.fitness_:.4f}"
+        )
+    
 
 if __name__ == "__main__":
     main()
