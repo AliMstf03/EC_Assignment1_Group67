@@ -1,6 +1,6 @@
 # Assignment 1 - Group 67
 # import the functions that are already maade in the example 
-from ariel.ec import EA, EAOperation, Individual, Population
+from ariel.ec import EA, EAOperation, Individual, Population, config
 
 
 # Standard library
@@ -177,9 +177,32 @@ def evaluate(population: Population, targets: list[nx.DiGraph]):
 
     return population
 
+# ============================================================================ #
+#  6. SELECTION
+# ============================================================================ #
+
+
+def survivor_selection(population: Population) -> Population:
+    shuffled = population.alive.shuffle()
+    alive_count = len(shuffled)
+    for idx in range(0, len(shuffled) - 1, 2):
+        if alive_count <= config.target_population_size:
+            break
+        ind_a = shuffled[idx]
+        ind_b = shuffled[idx + 1]
+
+        if ind_a.fitness_ is None or ind_b.fitness_ is None:
+            raise ValueError("Fitness missing")
+        
+        if ind_a.fitness_ <= ind_b.fitness_:
+            ind_b.alive = False
+        else:
+            ind_a.alive = False
+        alive_count -= 1
+    return population
 
 # ============================================================================ #
-#  6. LOOKING AT A BODY
+#  7. LOOKING AT A BODY
 # ============================================================================ #
 
 
@@ -224,13 +247,14 @@ def show_body(
 
 
 # ============================================================================ #
-#  7. ENTRY POINT
+#  8. ENTRY POINT
 # ============================================================================ #
 
 
 def main() -> None:
     targets = load_targets()
     population_size = 80
+    config.target_population_size = population_size 
 
     population = Population(
         [make_individual() for _ in range(population_size)]
@@ -240,6 +264,7 @@ def main() -> None:
     population = parent_selection(population)
     population = crossover(population)
     population = evaluate(population, targets)
+    population = survivor_selection(population)
 
     parents = population.where(
         lambda ind: bool(ind.tags.get("selected", False))
@@ -264,7 +289,6 @@ def main() -> None:
         console.log(
             f"child {index}: fitness={child.fitness_:.4f}"
         )
-    
 
 if __name__ == "__main__":
     main()
