@@ -181,6 +181,30 @@ def mutation_point(population: Population) -> Population:
         child.requires_eval = True
 
     return population
+
+
+def mutation_subtree(population: Population) -> Population:
+    for child in population:
+        # Alleen de kinderen die net door crossover gemaakt zijn
+        if not child.tags.get("mutate", False):
+            continue
+
+        # Tag eraf halen, anders wordt het kind de volgende generatie
+        # nog een keer gemuteerd
+        child.tags = {"mutate": False}
+
+        # Vervang een tak van het kind door een nieuwe random tak
+        mutate_subtree_replacement(
+            child.genotype,
+            max_modules=NUM_OF_MODULES,
+        )
+
+        # Genoom is veranderd, dus fitness moet opnieuw berekend worden
+        child.requires_eval = True
+
+    return population
+
+
 # ============================================================================ #
 #  4. FITNESS
 # ============================================================================ #
