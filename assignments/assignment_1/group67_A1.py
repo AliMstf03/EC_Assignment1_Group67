@@ -34,7 +34,12 @@ from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import (
     HighProbabilityDecoder,
 )
 from ariel.ec.genotypes.nde import NeuralDevelopmentalEncoding
-from ariel.ec.genotypes.tree.operators import (crossover_subtree, random_tree,)
+from ariel.ec.genotypes.tree.operators import (
+    crossover_subtree,
+    mutate_replace_node,
+    mutate_subtree_replacement,
+    random_tree,
+)
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.video_recorder import VideoRecorder
@@ -154,6 +159,28 @@ def crossover(population: Population) -> Population:
     return population
 
 
+# ============================================================================ #
+#  5. MUTATION
+# ============================================================================ #
+
+
+def mutation_point(population: Population) -> Population:
+    for child in population:
+        # Alleen de kinderen die net door crossover gemaakt zijn
+        if not child.tags.get("mutate", False):
+            continue
+
+        # Tag eraf halen, anders wordt het kind de volgende generatie
+        # nog een keer gemuteerd
+        child.tags = {"mutate": False}
+
+        # Verander 1 module van het kind
+        mutate_replace_node(child.genotype)
+
+        # Genoom is veranderd, dus fitness moet opnieuw berekend worden
+        child.requires_eval = True
+
+    return population
 # ============================================================================ #
 #  4. FITNESS
 # ============================================================================ #
