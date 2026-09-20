@@ -1,7 +1,7 @@
 # Assignment 1 - Group 67
 # import the functions that are already maade in the example 
-from ariel.ec import EA, EAOperation, Individual, Population
-
+from ariel.ec import EA, EAOperation, Individual, Population, config
+import csv
 
 # Standard library
 import random
@@ -34,7 +34,12 @@ from ariel.body_phenotypes.robogen_lite.decoders.hi_prob_decoding import (
     HighProbabilityDecoder,
 )
 from ariel.ec.genotypes.nde import NeuralDevelopmentalEncoding
-from ariel.ec.genotypes.tree.operators import (crossover_subtree, random_tree,)
+from ariel.ec.genotypes.tree.operators import (
+    crossover_subtree,
+    mutate_replace_node,
+    mutate_subtree_replacement,
+    random_tree,
+)
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.video_recorder import VideoRecorder
@@ -51,10 +56,9 @@ type ViewerTypes = Literal["launcher", "video", "frame", "none"]
 # network's weight initialisation uses torch's own RNG, entirely separate from
 # numpy/random. If you're using "nde", seed all THREE or your runs will not be
 # reproducible across separate script runs, even with the same seed value.
-SEED = 42
-RNG = np.random.default_rng(SEED)
-random.seed(SEED)
-torch.manual_seed(SEED)
+POPULATION_SIZE = 80
+GENERATIONS = 100
+SEEDS = [42, 43, 44, 45, 46]
 
 # --- DATA SETUP --- #
 SCRIPT_NAME = Path(__file__).stem
@@ -155,6 +159,52 @@ def crossover(population: Population) -> Population:
 
 
 # ============================================================================ #
+#  5. MUTATION
+# ============================================================================ #
+
+
+def mutation_point(population: Population) -> Population:
+    for child in population:
+        # Alleen de kinderen die net door crossover gemaakt zijn
+        if not child.tags.get("mutate", False):
+            continue
+
+        # Tag eraf halen, anders wordt het kind de volgende generatie
+        # nog een keer gemuteerd
+        child.tags = {"mutate": False}
+
+        # Verander 1 module van het kind
+        mutate_replace_node(child.genotype)
+
+        # Genoom is veranderd, dus fitness moet opnieuw berekend worden
+        child.requires_eval = True
+
+    return population
+
+
+def mutation_subtree(population: Population) -> Population:
+    for child in population:
+        # Alleen de kinderen die net door crossover gemaakt zijn
+        if not child.tags.get("mutate", False):
+            continue
+
+        # Tag eraf halen, anders wordt het kind de volgende generatie
+        # nog een keer gemuteerd
+        child.tags = {"mutate": False}
+
+        # Vervang een tak van het kind door een nieuwe random tak
+        mutate_subtree_replacement(
+            child.genotype,
+            max_modules=NUM_OF_MODULES,
+        )
+
+        # Genoom is veranderd, dus fitness moet opnieuw berekend worden
+        child.requires_eval = True
+
+    return population
+
+
+# ============================================================================ #
 #  4. FITNESS
 # ============================================================================ #
 
@@ -177,9 +227,32 @@ def evaluate(population: Population, targets: list[nx.DiGraph]):
 
     return population
 
+# ============================================================================ #
+#  6. SELECTION
+# ============================================================================ #
+
+
+def survivor_selection(population: Population) -> Population:
+    shuffled = population.alive.shuffle()
+    alive_count = len(shuffled)
+    for idx in range(0, len(shuffled) - 1, 2):
+        if alive_count <= config.target_population_size:
+            break
+        ind_a = shuffled[idx]
+        ind_b = shuffled[idx + 1]
+
+        if ind_a.fitness_ is None or ind_b.fitness_ is None:
+            raise ValueError("Fitness missing")
+        
+        if ind_a.fitness_ <= ind_b.fitness_:
+            ind_b.alive = False
+        else:
+            ind_a.alive = False
+        alive_count -= 1
+    return population
 
 # ============================================================================ #
-#  6. LOOKING AT A BODY
+#  7. LOOKING AT A BODY
 # ============================================================================ #
 
 
@@ -221,50 +294,271 @@ def show_body(
             # Mostly useful for showing a body slumping under gravity.
             recorder = VideoRecorder(output_folder=str(DATA / "__videos__"))
             video_renderer(model, data, duration=5.0, video_recorder=recorder)
+            
+
+def set_seed(seed):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 # ============================================================================ #
-#  7. ENTRY POINT
+#  8. ENTRY POINT
 # ============================================================================ #
 
+def run_ea(targets, mutation_function, seed, variant_name):
+    set_seed(seed)
 
-def main() -> None:
-    targets = load_targets()
     population_size = 80
+    generations = 100
 
+    config.target_population_size = population_size
+
+    # Initial population
     population = Population(
         [make_individual() for _ in range(population_size)]
     )
 
     population = evaluate(population, targets)
-    population = parent_selection(population)
-    population = crossover(population)
+
+    results = []
+
+    # Generation 0
+    fitness_values = [
+        ind.fitness_
+        for ind in population.alive
+        if ind.fitness_ is not None
+    ]
+
+    results.append({
+        "variant": variant_name,
+        "seed": seed,
+        "generation": 0,
+        "best_fitness": min(fitness_values),
+        "mean_fitness": float(np.mean(fitness_values)),
+    })
+
+    # Evolution
+    for generation in range(1, generations + 1):
+
+        # Only keep survivors from previous generation
+        population = population.alive
+
+        # Parent selection
+        population = parent_selection(population)
+
+        # Crossover
+        population = crossover(population)
+
+        # The only difference between the two EA variants
+        population = mutation_function(population)
+
+        # Evaluate new children
+        population = evaluate(population, targets)
+
+        # Bring population back to target size
+        population = survivor_selection(population)
+
+        # Fitness statistics
+        fitness_values = [
+            ind.fitness_
+            for ind in population.alive
+            if ind.fitness_ is not None
+        ]
+
+        results.append({
+            "variant": variant_name,
+            "seed": seed,
+            "generation": generation,
+            "best_fitness": min(fitness_values),
+            "mean_fitness": float(np.mean(fitness_values)),
+        })
+
+    return results
+
+### Dit is de algoritme 
+def run_ea(targets, mutation_function, seed, variant_name):
+    set_seed(seed)
+
+    population_size = 80
+    generations = 100
+
+    config.target_population_size = population_size
+
+    # Initial population
+    population = Population(
+        [make_individual() for _ in range(population_size)]
+    )
+
     population = evaluate(population, targets)
 
-    parents = population.where(
-        lambda ind: bool(ind.tags.get("selected", False))
-    )
+    results = []
 
-    children = population.where(
-        lambda ind: bool(ind.tags.get("mutate", False))
-    )
+    # Generation 0
+    fitness_values = [
+        ind.fitness_
+        for ind in population.alive
+        if ind.fitness_ is not None
+    ]
 
-    console.log("")
-    console.log(f"parents: {len(parents)}")
+    results.append({
+        "variant": variant_name,
+        "seed": seed,
+        "generation": 0,
+        "best_fitness": min(fitness_values),
+        "mean_fitness": float(np.mean(fitness_values)),
+    })
 
-    for index, parent in enumerate(parents):
-        console.log(
-            f"parent {index}: fitness={parent.fitness_:.4f}"
+    # Evolution
+    for generation in range(1, generations + 1):
+
+        # Only keep survivors from previous generation
+        population = population.alive
+
+        # Parent selection
+        population = parent_selection(population)
+
+        # Crossover
+        population = crossover(population)
+
+        # The only difference between the two EA variants
+        population = mutation_function(population)
+
+        # Evaluate new children
+        population = evaluate(population, targets)
+
+        # Bring population back to target size
+        population = survivor_selection(population)
+
+        # Fitness statistics
+        fitness_values = [
+            ind.fitness_
+            for ind in population.alive
+            if ind.fitness_ is not None
+        ]
+
+        results.append({
+            "variant": variant_name,
+            "seed": seed,
+            "generation": generation,
+            "best_fitness": min(fitness_values),
+            "mean_fitness": float(np.mean(fitness_values)),
+        })
+
+    return results
+
+def run_random_search(targets, seed):
+    set_seed(seed)
+
+    population_size = 80
+    generations = 100
+    samples_per_generation = population_size // 2
+
+    results = []
+
+    best_so_far = float("inf")
+
+    for generation in range(generations + 1):
+
+        if generation == 0:
+            number_to_generate = population_size
+        else:
+            number_to_generate = samples_per_generation
+
+        random_population = Population(
+            [make_individual() for _ in range(number_to_generate)]
         )
 
-    console.log("")
-    console.log(f"children: {len(children)}")
-
-    for index, child in enumerate(children):
-        console.log(
-            f"child {index}: fitness={child.fitness_:.4f}"
+        random_population = evaluate(
+            random_population,
+            targets
         )
-    
+
+        fitness_values = [
+            ind.fitness_
+            for ind in random_population
+            if ind.fitness_ is not None
+        ]
+
+        generation_best = min(fitness_values)
+
+        best_so_far = min(
+            best_so_far,
+            generation_best
+        )
+
+        results.append({
+            "variant": "Random Search",
+            "seed": seed,
+            "generation": generation,
+            "best_fitness": best_so_far,
+            "mean_fitness": float(np.mean(fitness_values)),
+        })
+
+    return results
+
+
+def main():
+    targets = load_targets()
+
+    seeds = [42, 43, 44, 45, 46]
+
+    all_results = []
+
+    for seed in seeds:
+
+        console.log(f"Running seed {seed}")
+
+        # Variant 1: Point mutation
+        console.log("Point mutation")
+        point_results = run_ea(
+            targets,
+            mutation_point,
+            seed,
+            "Point Mutation"
+        )
+
+        all_results.extend(point_results)
+
+        # Variant 2: Subtree mutation
+        console.log("Subtree mutation")
+        subtree_results = run_ea(
+            targets,
+            mutation_subtree,
+            seed,
+            "Subtree Mutation"
+        )
+
+        all_results.extend(subtree_results)
+
+        # Random-search baseline
+        console.log("Random search")
+        random_results = run_random_search(
+            targets,
+            seed
+        )
+
+        all_results.extend(random_results)
+
+    # Save raw experimental results
+    output_file = DATA / "experiment_results.csv"
+
+    with open(output_file, "w", newline="") as file:
+        writer = csv.DictWriter(
+            file,
+            fieldnames=[
+                "variant",
+                "seed",
+                "generation",
+                "best_fitness",
+                "mean_fitness",
+            ],
+        )
+
+        writer.writeheader()
+        writer.writerows(all_results)
+
+    console.log(f"Results saved to: {output_file}")
 
 if __name__ == "__main__":
     main()
