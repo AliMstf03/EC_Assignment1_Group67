@@ -391,6 +391,7 @@ def run_ea(targets, mutation_function, seed, variant_name):
     )
 
     population = evaluate(population, targets)
+    population = survivor_selection(population)
 
     results = []
 
