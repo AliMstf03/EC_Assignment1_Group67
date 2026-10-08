@@ -13,7 +13,7 @@ from mujoco import viewer
 from ariel import console
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
-from ariel.ec import set_seed
+#from ariel.ec import set_seed
 from ariel.simulation.environments import SimpleFlatWorld
 from ariel.utils.renderers import single_frame_renderer, video_renderer
 from ariel.utils.runners import simple_runner
@@ -31,7 +31,7 @@ RNG = np.random.default_rng(SEED)
 # ariel.ec's own generators/mutators/crossover draw from a separate,
 # package-level RNG. Reseed it too if you build your EA on ariel.ec,
 # or every one of your "multiple seeds" runs the same variation operators.
-set_seed(SEED)
+#set_seed(SEED)
 
 # --- DATA SETUP --- #
 SCRIPT_NAME = Path(__file__).stem
@@ -170,7 +170,7 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
 
     weights = make_random_weights(input_size, output_size)
 
-    # Initialize minimum z height of the robot core.
+    # Initialize minimum z height of the robot.
     min_z_height = get_min_z_height(data)
 
     def control_callback(m: mj.MjModel, d: mj.MjData) -> None:
