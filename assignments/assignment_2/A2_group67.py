@@ -2,6 +2,7 @@
 # Standard library
 from pathlib import Path
 from typing import Literal
+import csv
 
 # Third-party libraries
 import mujoco as mj
@@ -66,6 +67,7 @@ def build_robot() -> CoreModule:
 
 # Controller architecture - decide before writing your EA.
 HIDDEN_SIZE: int = 6
+POP_SIZE: int = 80
 
 
 def nn_controller(model: mj.MjModel, data: mj.MjData, weights: list[npt.NDArray[np.float64]],) -> npt.NDArray[np.float64]:
@@ -95,9 +97,39 @@ def make_random_weights(
         RNG.normal(scale=0.5, size=(HIDDEN_SIZE, output_size)),
     ]
 
+def flatten_weights(weights: list[npt.NDArray[np.float64]]) -> npt.NDArray[np.float64]:
+    """Flatten [w1, w2] into one 1D genotype vector."""
+    return np.concatenate([w.ravel() for w in weights])
+
+def unflatten_weights(flat: npt.NDArray[np.float64], input_size: int, output_size: int):
+    """Reshape a flat genotype back into [w1, w2] for nn_controller."""
+    split = input_size * HIDDEN_SIZE
+    w1 = flat[:split].reshape(input_size, HIDDEN_SIZE)
+    w2 = flat[split:].reshape(HIDDEN_SIZE, output_size)
+    return [w1, w2]
+
 
 # ============================================================================ #
-#  3. POSITION AND FITNESS
+#  3. Individuals and Population
+# ============================================================================ #
+
+
+def make_individual(
+    input_size: int,
+    output_size: int,
+) -> npt.NDArray[np.float64]:
+    """Create one random individual: a flattened genotype (weight vector)."""
+    weights = make_random_weights(input_size, output_size)
+    return flatten_weights(weights)
+
+
+def init_population(pop_size: int, input_size: int, output_size: int,
+) -> list[npt.NDArray[np.float64]]:
+    return [make_individual(input_size, output_size) for _ in range(pop_size)]
+
+
+# ============================================================================ #
+#  4. POSITION AND FITNESS
 # ============================================================================ #
 
 
@@ -130,17 +162,11 @@ def fitness_function(
 # ============================================================================ #
 
 
-def run_experiment(mode: ViewerTypes = MODE) -> float:
-    """Set up the world, run one simulation, and return the fitness.
-
-    This is the function your EA calls once per individual, with `mode` set
-    to "simple" (headless).
-
-    Returns
-    -------
-    float
-        The fitness of this run. Lower is better.
-    """
+def run_experiment(
+    mode: ViewerTypes = MODE,
+    individual: npt.NDArray[np.float64] | None = None,
+) -> float:
+    """Pass `individual` to replay a specific genotype; omit it for random weights."""
     # MuJoCo's control callback is a GLOBAL. Clear it. DO NOT REMOVE.
     mj.set_mjcb_control(None)
 
@@ -168,7 +194,11 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
     input_size = len(data.qpos)
     output_size = model.nu
 
-    weights = make_random_weights(input_size, output_size)
+    weights = (
+        unflatten_weights(individual, input_size, output_size)
+        if individual is not None
+        else make_random_weights(input_size, output_size)
+    )
 
     # Initialize minimum z height of the robot.
     min_z_height = get_min_z_height(data)
@@ -227,9 +257,6 @@ def run_experiment(mode: ViewerTypes = MODE) -> float:
     final_position = get_core_position(data)
     fitness = fitness_function(initial_position, final_position, min_z_height)
 
-    console.log(f"start  : {np.round(initial_position, 3)}")
-    console.log(f"end    : {np.round(final_position, 3)}")
-    console.log(f"target : {np.round(TARGET_POSITION, 3)}")
     console.log(f"fitness: {fitness:.4f}   (lower is better)")
 
     return fitness
@@ -259,7 +286,23 @@ def main() -> None:
     console.log(f"controller outputs (model.nu)      : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
 
-    run_experiment(MODE)
+    population = init_population(POP_SIZE, input_size, output_size)
+    console.log(f"population size                     : {len(population)}")
+
+    fitnesses = [run_experiment(mode="simple", individual=ind) for ind in population]
+    console.log(f"best fitness  : {min(fitnesses):.4f}")
+    console.log(f"mean fitness  : {np.mean(fitnesses):.4f}")
+    console.log(f"worst fitness : {max(fitnesses):.4f}")
+
+    results_path = DATA / "fitness_results.csv"
+    with results_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["individual", "fitness"])
+        writer.writerows(enumerate(fitnesses))
+
+    # Watch the best individual found move in the viewer.
+    best_individual = population[int(np.argmin(fitnesses))]
+    run_experiment(mode=MODE, individual=best_individual)
 
 
 if __name__ == "__main__":
