@@ -12,6 +12,7 @@ from mujoco import viewer
 
 # Local libraries (ARIEL)
 from ariel import console
+from ariel.ec import Population, config
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
 #from ariel.ec import set_seed
@@ -126,6 +127,32 @@ def make_individual(
 def init_population(pop_size: int, input_size: int, output_size: int,
 ) -> list[npt.NDArray[np.float64]]:
     return [make_individual(input_size, output_size) for _ in range(pop_size)]
+
+# ============================================================================ #
+#  Survivor selection
+# ============================================================================ #
+
+def survivor_selection(population: Population) -> Population:
+
+    candidates = list(population.alive)
+    target_size = config.target_population_size
+
+    if not 1 <= target_size <= len(candidates):
+        raise ValueError("Invalid target population size.")
+
+    for ind in candidates:
+        if ind.requires_eval or ind.fitness_ is None:
+            raise ValueError("All candidates must have evaluated fitness.")
+    
+    # Sort candidates by fitness (lower is better)
+    sorted_candidates = sorted(candidates, key=lambda ind: float(ind.fitness_))
+
+    # Marking the indiviuals that are not selected for the next generation as dead
+    for ind in sorted_candidates[target_size:]:
+        ind.alive = False
+
+    return population
+
 
 
 # ============================================================================ #
@@ -286,6 +313,7 @@ def main() -> None:
     console.log(f"controller outputs (model.nu)      : {output_size}")
     console.log(f"genotype length (total weights)    : {num_weights}")
 
+    config.target_population_size = POP_SIZE
     population = init_population(POP_SIZE, input_size, output_size)
     console.log(f"population size                     : {len(population)}")
 
