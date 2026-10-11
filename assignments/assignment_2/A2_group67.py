@@ -12,7 +12,7 @@ from mujoco import viewer
 
 # Local libraries (ARIEL)
 from ariel import console
-from ariel.ec import Population, config
+from ariel.ec import FloatMutator, Population, config
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
 #from ariel.ec import set_seed
@@ -153,6 +153,65 @@ def survivor_selection(population: Population) -> Population:
 
     return population
 
+
+# ============================================================================ #
+#  Mutation
+# ============================================================================ #
+
+def mutation_synapse(
+    population: Population,
+    std: float = 0.1,
+    probability: float = 0.15,
+) -> Population:
+    """Mutate separate weights: each gene is perturbed on its own."""
+
+    for ind in population:
+
+        # Only the children made by crossover, same as in assignment 1.
+        if not ind.tags.get("mutate", False):
+            continue
+
+        ind.tags = {"mutate": False}
+
+        ind.genotype_ = FloatMutator.gaussian(
+            ind.genotype_,
+            std=std,
+            mutation_probability=probability,
+        )
+
+        ind.requires_eval = True
+
+    return population
+
+
+def mutation_neuron(
+    population: Population,
+    input_size: int,
+    output_size: int,
+    std: float = 0.1,
+    units: int = 1,
+) -> Population:
+    """Mutate whole neurons: every weight going in and out of one hidden unit."""
+
+    for ind in population:
+
+        if not ind.tags.get("mutate", False):
+            continue
+
+        ind.tags = {"mutate": False}
+
+        flat = np.asarray(ind.genotype_, dtype=float).copy()
+        w1, w2 = unflatten_weights(flat, input_size, output_size)
+        w1, w2 = w1.copy(), w2.copy()
+
+        for h in RNG.choice(HIDDEN_SIZE, size=units, replace=False):
+            w1[:, h] += RNG.normal(scale=std, size=input_size)
+            w2[h, :] += RNG.normal(scale=std, size=output_size)
+
+        ind.genotype_ = flatten_weights([w1, w2]).tolist()
+        ind.requires_eval = True
+
+    return population
 
 
 # ============================================================================ #
