@@ -12,7 +12,8 @@ from mujoco import viewer
 
 # Local libraries (ARIEL)
 from ariel import console
-from ariel.ec import FloatMutator, Population, config
+from ariel.ec import FloatMutator, Individual, Population, config
+from ariel.ec.crossover import Crossover
 from ariel.body_phenotypes.robogen_lite.modules.core import CoreModule
 from ariel.body_phenotypes.robogen_lite.prebuilt_robots.gecko import gecko
 #from ariel.ec import set_seed
@@ -150,6 +151,44 @@ def survivor_selection(population: Population) -> Population:
     # Marking the indiviuals that are not selected for the next generation as dead
     for ind in sorted_candidates[target_size:]:
         ind.alive = False
+
+    return population
+
+
+# ============================================================================ #
+#  Crossover
+# ============================================================================ #
+
+def crossover(population: Population) -> Population:
+
+    # Only the individuals that parent selection marked as parents
+    parents = []
+    for ind in population:
+        if ind.tags.get("selected", False):
+            parents.append(ind)
+
+    # Take the parents two at a time.
+    for idx in range(0, len(parents) - 1, 2):
+        parent_a = parents[idx]
+        parent_b = parents[idx + 1]
+
+        # Framework default swap probability of 0.5, same for both variants.
+        genome_a, genome_b = Crossover.uniform(
+            parent_a.genotype,
+            parent_b.genotype,
+        )
+
+        child_a = Individual()
+        child_a.genotype = genome_a
+        child_a.tags = {"mutate": True}
+        child_a.requires_eval = True
+
+        child_b = Individual()
+        child_b.genotype = genome_b
+        child_b.tags = {"mutate": True}
+        child_b.requires_eval = True
+
+        population.extend([child_a, child_b])
 
     return population
 
